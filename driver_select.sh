@@ -8,7 +8,7 @@
 
 AUTHOR="MD MAWA ISLAM"
 TG="@mawa4k"
-VERSION="v3.0"
+VERSION="v3.1"
 LINK="https://github.com/Mawa4k/Driver/raw/main/Kernel%20Driver.zip"
 
 H=/data/data/com.termux/files/home
@@ -145,28 +145,29 @@ setup() {
 }
 
 # ---------- MATCH LOGIC ----------
+verof() { echo "$1" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1; }
+
 # result in MATCHLVL: 2 exact, 1 same series, 0 none
 classify() {
-  local base="${1%.sh}" st sser
-  st="${base%%[a-zA-Z]*}"
+  local st sser
+  st=$(verof "$1"); MATCHLVL=0
+  [ -z "$st" ] && return
   sser=$(echo "$st" | cut -d. -f1-2)
-  MATCHLVL=0
   if [ "$KVER" = "$st" ] || [[ "$KVER" == "$st".* ]]; then MATCHLVL=2
   elif [ "$sser" = "$KSER" ]; then MATCHLVL=1
   fi
 }
 
-# closest patch inside same series → BESTFILE
+# closest patch inside same series → BESTREL
 find_best() {
-  BESTFILE=""; local f st p diff bestdiff=999999 lvl
-  for f in "$@"; do
-    classify "$f"; lvl=$MATCHLVL
-    [ "$lvl" = "2" ] && { BESTFILE="$f"; return; }
-    if [ "$lvl" = "1" ]; then
-      st="${f%.sh}"; st="${st%%[a-zA-Z]*}"
-      p=$(echo "$st" | cut -d. -f3); [ -z "$p" ] && p=0
+  BESTREL=""; local r st p diff bestdiff=999999
+  for r in "$@"; do
+    classify "$r"
+    [ "$MATCHLVL" = "2" ] && { BESTREL="$r"; return; }
+    if [ "$MATCHLVL" = "1" ]; then
+      st=$(verof "$r"); p=$(echo "$st" | cut -d. -f3); [ -z "$p" ] && p=0
       diff=$(( p > KPATCH ? p - KPATCH : KPATCH - p ))
-      if [ "$diff" -lt "$bestdiff" ]; then bestdiff=$diff; BESTFILE="$f"; fi
+      if [ "$diff" -lt "$bestdiff" ]; then bestdiff=$diff; BESTREL="$r"; fi
     fi
   done
 }
@@ -177,30 +178,47 @@ legend() {
   echo
 }
 
+# ---------- FIND TOP-LEVEL PACKS ----------
+get_packs() {
+  local b="$OUT" n d p
+  while :; do
+    n=$(find "$b" -mindepth 1 -maxdepth 1 ! -name '__MACOSX' | wc -l)
+    d=$(find "$b" -mindepth 1 -maxdepth 1 -type d ! -name '__MACOSX' | wc -l)
+    [ "$n" -eq 1 ] && [ "$d" -eq 1 ] || break
+    b=$(find "$b" -mindepth 1 -maxdepth 1 -type d ! -name '__MACOSX')
+  done
+  PACKS=()
+  while IFS= read -r p; do
+    [ -n "$(find "$p" -type f -name '*.sh' 2>/dev/null | head -n 1)" ] && PACKS+=("$p")
+  done < <(find "$b" -mindepth 1 -maxdepth 1 -type d ! -name '__MACOSX' | sort -V)
+}
+
 # ---------- MENUS ----------
 choose_folder() {
   while true; do
     banner; sysinfo
-    mapfile -t FOLDERS < <(find "$OUT" -type f -name '*.sh' -printf '%h\n' 2>/dev/null | grep -v __MACOSX | sort -u)
-    [ ${#FOLDERS[@]} -eq 0 ] && die "কোনো driver folder পাওয়া যায়নি"
+    get_packs
+    [ ${#PACKS[@]} -eq 0 ] && die "কোনো driver folder পাওয়া যায়নি"
 
-    echo -e "${G}  [ DRIVER PACKS: ${#FOLDERS[@]} ]${N}"
+    echo -e "${G}  [ SELECT DRIVER FOLDER: ${#PACKS[@]} ]${N}"
     hr
     local i=0 d cnt hit f
-    for d in "${FOLDERS[@]}"; do
+    for d in "${PACKS[@]}"; do
       i=$((i+1))
-      cnt=$(ls -1 "$d"/*.sh 2>/dev/null | wc -l)
-      hit=""
-      for f in "$d"/*.sh; do
-        classify "$(basename "$f")"
-        [ "$MATCHLVL" -ge 1 ] && { hit="  ${Y}★ match${N}"; break; }
-      done
+      cnt=0; hit=""
+      while IFS= read -r f; do
+        cnt=$((cnt+1))
+        if [ -z "$hit" ]; then
+          classify "${f#"$d"/}"
+          [ "$MATCHLVL" -ge 1 ] && hit="  ${Y}★ match${N}"
+        fi
+      done < <(find "$d" -type f -name '*.sh')
       echo -e "  ${C}[$i]${W} $(basename "$d") ${DG}(${cnt} drivers)${N}${hit}"
     done
     hr
     echo -e "  ${Y}[u]${W} Update   ${Y}[c]${W} Clear cache   ${Y}[t]${W} Telegram   ${Y}[0]${W} Exit"
     echo
-    echo -ne "${G}  mawa4k@rtdev${W}:${B}packs${W}# ${N}"
+    echo -ne "${G}  mawa4k@rtdev${W}:${B}folders${W}# ${N}"
     read -r n
     case "$n" in
       0) echo -e "\n${G}  Bye! Follow ${TG}${N}\n"; exit 0 ;;
@@ -209,8 +227,8 @@ choose_folder() {
       t|T) command -v termux-open-url >/dev/null && termux-open-url "https://t.me/mawa4k" ;;
       ''|*[!0-9]*) wrn "ভুল ইনপুট!"; sleep 1 ;;
       *)
-        if [ "$n" -ge 1 ] && [ "$n" -le ${#FOLDERS[@]} ]; then
-          DRV="${FOLDERS[$((n-1))]}"
+        if [ "$n" -ge 1 ] && [ "$n" -le ${#PACKS[@]} ]; then
+          PACK="${PACKS[$((n-1))]}"
           choose_driver && return 0
         else
           wrn "ভুল নম্বর!"; sleep 1
@@ -222,20 +240,20 @@ choose_folder() {
 choose_driver() {
   while true; do
     banner; sysinfo
-    mapfile -t FILES < <(cd "$DRV" && ls -1 *.sh 2>/dev/null | sort -V)
+    mapfile -t FILES < <(find "$PACK" -type f -name '*.sh' | sed "s|^$PACK/||" | sort -V)
     find_best "${FILES[@]}"
 
-    echo -e "${G}  [ $(basename "$DRV") — ${#FILES[@]} drivers ]${N}"
+    echo -e "${G}  [ $(basename "$PACK") — ${#FILES[@]} drivers ]${N}"
     hr
-    local i=0 f tag
-    for f in "${FILES[@]}"; do
+    local i=0 r tag
+    for r in "${FILES[@]}"; do
       i=$((i+1))
-      classify "$f"; tag=""
+      classify "$r"; tag=""
       if [ "$MATCHLVL" = "2" ]; then tag="${G}★ EXACT${N}"
-      elif [ "$f" = "$BESTFILE" ]; then tag="${Y}★ BEST${N}"
+      elif [ "$r" = "$BESTREL" ]; then tag="${Y}★ BEST${N}"
       elif [ "$MATCHLVL" = "1" ]; then tag="${C}● RECOMMENDED${N}"
       fi
-      printf "  ${C}[%2d]${W} %-14s${N} %b\n" "$i" "${f%.sh}" "$tag"
+      echo -e "  ${C}[$i]${W} ${r%.sh}${N} ${tag}"
     done
     hr
     legend
@@ -258,11 +276,12 @@ choose_driver() {
 }
 
 run_driver() {
-  local F="$1"
+  local REL="$1" F SRC
+  F=$(basename "$REL"); SRC="$PACK/$REL"
   echo
-  inf "Selected  : ${W}${F%.sh}${N}"
+  inf "Selected  : ${W}${REL%.sh}${N}"
   inf "Copying   : ${W}$T/$F${N}"
-  su -c "cp '$DRV/$F' '$T/$F' && chmod 755 '$T/$F'" || die "Copy failed! Root access চেক করো।"
+  su -c "cp '$SRC' '$T/$F' && chmod 755 '$T/$F'" || die "Copy failed! Root access চেক করো।"
   ok "Copied & permission set"
   inf "Executing..."
   hr
