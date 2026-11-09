@@ -9,7 +9,7 @@
 AUTHOR="MD MAWA ISLAM"
 TG="@mawa4k"
 VERSION="v3.1"
-LINK="https://github.com/Mawa4k/Driver/raw/main/Kernel%20Driver.zip"
+LINK="https://github.com/Mawa4k/Driver/releases/latest/download/KernelDriver.zip"
 
 H=/data/data/com.termux/files/home
 T=/data/local/tmp
