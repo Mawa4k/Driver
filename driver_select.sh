@@ -8,7 +8,7 @@
 
 AUTHOR="MD MAWA ISLAM"
 TG="@mawa4k"
-VERSION="v3.1"
+VERSION="v3.2"
 LINK="https://github.com/Mawa4k/Driver/releases/latest/download/KernelDriver.zip.zip"
 
 H=/data/data/com.termux/files/home
@@ -144,33 +144,36 @@ setup() {
   sleep 0.4
 }
 
-# ---------- MATCH LOGIC ----------
-verof() { echo "$1" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1; }
+# ---------- MATCH LOGIC (pure bash, no subshells = fast) ----------
+verof() { VER=""; [[ "$1" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]] && VER="${BASH_REMATCH[1]}"; }
 
 # result in MATCHLVL: 2 exact, 1 same series, 0 none
 classify() {
-  local st sser
-  st=$(verof "$1"); MATCHLVL=0
-  [ -z "$st" ] && return
-  sser=$(echo "$st" | cut -d. -f1-2)
-  if [ "$KVER" = "$st" ] || [[ "$KVER" == "$st".* ]]; then MATCHLVL=2
-  elif [ "$sser" = "$KSER" ]; then MATCHLVL=1
+  MATCHLVL=0; verof "$1"
+  [ -z "$VER" ] && return
+  local a b c
+  IFS=. read -r a b c <<<"$VER"
+  if [ "$KVER" = "$VER" ] || [[ "$KVER" == "$VER".* ]]; then MATCHLVL=2
+  elif [ "$a.$b" = "$KSER" ]; then MATCHLVL=1
   fi
 }
 
-# closest patch inside same series → BESTREL
+# closest patch inside same series -> BESTREL
 find_best() {
-  BESTREL=""; local r st p diff bestdiff=999999
+  BESTREL=""; local r a b p diff bestdiff=999999
   for r in "$@"; do
     classify "$r"
     [ "$MATCHLVL" = "2" ] && { BESTREL="$r"; return; }
     if [ "$MATCHLVL" = "1" ]; then
-      st=$(verof "$r"); p=$(echo "$st" | cut -d. -f3); [ -z "$p" ] && p=0
+      IFS=. read -r a b p <<<"$VER"; [ -z "$p" ] && p=0
       diff=$(( p > KPATCH ? p - KPATCH : KPATCH - p ))
       if [ "$diff" -lt "$bestdiff" ]; then bestdiff=$diff; BESTREL="$r"; fi
     fi
   done
 }
+
+# আগে থেকে টাইপ করা/বাফারে থাকা ইনপুট ফেলে দেয় (ভুল driver চলা আটকায়)
+drain() { [ -t 0 ] || return 0; local _x; while IFS= read -r -t 0.02 -n 1000 _x; do :; done; }
 
 legend() {
   echo -e "  ${G}★ EXACT${N} = kernel মিলেছে   ${Y}★ BEST${N} = সবচেয়ে কাছের"
@@ -230,7 +233,7 @@ choose_folder() {
     echo -e "  ${Y}[u]${W} Update   ${Y}[c]${W} Clear cache   ${Y}[t]${W} Telegram   ${Y}[0]${W} Exit"
     echo
     echo -ne "${G}  mawa4k@rtdev${W}:${B}folders${W}# ${N}"
-    read -r n
+    drain; read -r n || exit 0
     case "$n" in
       0) echo -e "\n${G}  Bye! Follow ${TG}${N}\n"; exit 0 ;;
       u|U) rm -rf "$OUT" "$ZIP"; wrn "Cache মুছে নতুন করে download হচ্ছে..."; setup ;;
@@ -240,6 +243,7 @@ choose_folder() {
       *)
         if [ "$n" -ge 1 ] && [ "$n" -le ${#PACKS[@]} ]; then
           PACK="${PACKS[$((n-1))]}"
+          echo -e "\n${C}[ .. ] Loading drivers...${N}"
           choose_driver && return 0
         else
           wrn "ভুল নম্বর!"; sleep 1
@@ -271,14 +275,14 @@ choose_driver() {
     echo -e "  ${Y}[b]${W} Back   ${Y}[0]${W} Exit"
     echo
     echo -ne "${G}  mawa4k@rtdev${W}:${B}drivers${W}# ${N}"
-    read -r n
+    drain; read -r n || exit 0
     case "$n" in
       0) echo -e "\n${G}  Bye! Follow ${TG}${N}\n"; exit 0 ;;
       b|B) return 1 ;;
       ''|*[!0-9]*) wrn "ভুল ইনপুট!"; sleep 1 ;;
       *)
         if [ "$n" -ge 1 ] && [ "$n" -le ${#FILES[@]} ]; then
-          run_driver "${FILES[$((n-1))]}"; return 0
+          if run_driver "${FILES[$((n-1))]}"; then return 0; fi
         else
           wrn "ভুল নম্বর!"; sleep 1
         fi ;;
@@ -290,6 +294,9 @@ run_driver() {
   local REL="$1" F SRC
   F=$(basename "$REL"); SRC="$PACK/$REL"
   echo
+  echo -ne "${Y}  Run ${W}${REL%.sh}${Y} ? [Y/n]: ${N}"
+  drain; read -r ans || exit 0
+  case "$ans" in n|N) return 1 ;; esac
   inf "Selected  : ${W}${REL%.sh}${N}"
   inf "Copying   : ${W}$T/$F${N}"
   su -c "cp '$SRC' '$T/$F' && chmod 755 '$T/$F'" || die "Copy failed! Root access চেক করো।"
