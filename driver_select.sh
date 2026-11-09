@@ -179,6 +179,16 @@ legend() {
 }
 
 # ---------- FIND TOP-LEVEL PACKS ----------
+list_scripts() {
+  local p="$1"
+  if [ "$p" = "$BASE" ]; then
+    find "$p" -maxdepth 1 -type f -name '*.sh' ! -name 'kernel-info.sh' -printf '%P\n'
+  else
+    find "$p" -type f -name '*.sh' ! -name 'kernel-info.sh' -printf '%P\n'
+  fi
+}
+pack_name() { [ "$1" = "$BASE" ] && echo "Main Drivers" || basename "$1"; }
+
 get_packs() {
   local b="$OUT" n d p
   while :; do
@@ -187,9 +197,10 @@ get_packs() {
     [ "$n" -eq 1 ] && [ "$d" -eq 1 ] || break
     b=$(find "$b" -mindepth 1 -maxdepth 1 -type d ! -name '__MACOSX')
   done
-  PACKS=()
+  BASE="$b"; PACKS=()
+  [ -n "$(list_scripts "$BASE" | head -n 1)" ] && PACKS+=("$BASE")
   while IFS= read -r p; do
-    [ -n "$(find "$p" -type f -name '*.sh' 2>/dev/null | head -n 1)" ] && PACKS+=("$p")
+    [ -n "$(list_scripts "$p" | head -n 1)" ] && PACKS+=("$p")
   done < <(find "$b" -mindepth 1 -maxdepth 1 -type d ! -name '__MACOSX' | sort -V)
 }
 
@@ -209,11 +220,11 @@ choose_folder() {
       while IFS= read -r f; do
         cnt=$((cnt+1))
         if [ -z "$hit" ]; then
-          classify "${f#"$d"/}"
+          classify "$f"
           [ "$MATCHLVL" -ge 1 ] && hit="  ${Y}★ match${N}"
         fi
-      done < <(find "$d" -type f -name '*.sh')
-      echo -e "  ${C}[$i]${W} $(basename "$d") ${DG}(${cnt} drivers)${N}${hit}"
+      done < <(list_scripts "$d")
+      echo -e "  ${C}[$i]${W} $(pack_name "$d") ${DG}(${cnt} drivers)${N}${hit}"
     done
     hr
     echo -e "  ${Y}[u]${W} Update   ${Y}[c]${W} Clear cache   ${Y}[t]${W} Telegram   ${Y}[0]${W} Exit"
@@ -240,10 +251,10 @@ choose_folder() {
 choose_driver() {
   while true; do
     banner; sysinfo
-    mapfile -t FILES < <(find "$PACK" -type f -name '*.sh' | sed "s|^$PACK/||" | sort -V)
+    mapfile -t FILES < <(list_scripts "$PACK" | sort -V)
     find_best "${FILES[@]}"
 
-    echo -e "${G}  [ $(basename "$PACK") — ${#FILES[@]} drivers ]${N}"
+    echo -e "${G}  [ $(pack_name "$PACK") — ${#FILES[@]} drivers ]${N}"
     hr
     local i=0 r tag
     for r in "${FILES[@]}"; do
